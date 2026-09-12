@@ -107,6 +107,9 @@ fcEnsureDefaults();
 ensureCategoriesDefaults();
 logActivity('restore', 'Restauration d\'une sauvegarde JSON'+(d.exportedAt?' du '+new Date(d.exportedAt).toLocaleDateString('fr-FR'):''));
 saveState('all'); applyAppName(); renderDashboard();
+// Le journal restauré n'est pas couvert par saveState('all') (voir README, section
+// "Journal d'activité") — on le pousse explicitement vers le cloud.
+if (window.restoreActivityLogFull) window.restoreActivityLogFull(state.activityLog);
 if (window.flushSyncNow) window.flushSyncNow();
 showToast('✓ Données restaurées et synchronisées avec succès');
 } catch(err) { showToast('⚠ Fichier JSON invalide','#f66'); }
@@ -511,16 +514,17 @@ added++;
 });
 } else if (UI.type === 'entrees') {
 UI.mappedData.forEach(r => {
-state.purchases.push({ date:r.date, article:r.article, quantite:r.quantite, prix_ttc:r.prix_ttc||0, total:r.total||0, fournisseur:r.fournisseur||'', facture:r.facture||'', categorie:r.categorie||'' });
+const destination = r.destination || 'Économat';
+state.purchases.push({ date:r.date, article:r.article, quantite:r.quantite, prix_ttc:r.prix_ttc||0, total:r.total||0, fournisseur:r.fournisseur||'', facture:r.facture||'', categorie:r.categorie||'', destination });
 const art = state.articles.find(a => a.designation.toLowerCase()===r.article.toLowerCase());
-if (art) art.total_entrant = (art.total_entrant||0) + r.quantite;
+if (art) { art.total_entrant = (art.total_entrant||0) + r.quantite; ajusterStockEmplacement(art, destination, r.quantite); }
 added++;
 });
 } else if (UI.type === 'sorties') {
 UI.mappedData.forEach(r => {
 state.sorties.push({ date:r.date, article:r.article, quantite:r.quantite, secteur:r.secteur||'', categorie:r.categorie||'' });
 const art = state.articles.find(a => a.designation.toLowerCase()===r.article.toLowerCase());
-if (art) art.total_sortant = (art.total_sortant||0) + r.quantite;
+if (art) { art.total_sortant = (art.total_sortant||0) + r.quantite; ajusterStockEmplacement(art, resolveEmplacementSortie(r.secteur), -r.quantite); }
 added++;
 });
 } else if (UI.type === 'fournisseurs') {

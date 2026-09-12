@@ -254,3 +254,90 @@ Restaurer sur celle de son choix) — le point 2 ci-dessus était le seul obstac
   — la structure le permettrait désormais, mais ce n'est pas activé.
 - Pas de pagination "charger plus" sur le journal au-delà des 500 entrées les
   plus récentes chargées au login.
+
+### Correctif CRITIQUE : cloudSaveNow écrivait au mauvais endroit pour un établissement non migré
+
+Découvert en traitant la demande suivante (import JSON) : `cloudSaveNow(domain)`
+écrivait **toujours** dans les nouvelles sous-collections `data/{domaine}`,
+même pour un établissement dont `migratedAt` est absent. Concrètement, ça
+voulait dire que **dès le déploiement de cette version, avant même d'avoir
+cliqué sur "Migrer maintenant"**, toute nouvelle vente/entrée/article aurait
+été écrite dans un endroit que l'app ne relit jamais tant qu'elle n'est pas
+migrée — les données auraient semblé se sauvegarder, puis disparaître
+silencieusement à la reconnexion.
+
+Corrigé : `cloudSaveNow`, `saveActivityLogEntry` et `clearActivityLogCloud`
+vérifient maintenant `window._migrationPending` et écrivent à l'ancien format
+(champ plat sur `users/{id}`) tant que l'établissement n'est pas migré, et
+uniquement dans les sous-collections une fois `migratedAt` présent.
+
+**Résidu mineur accepté** : `window._migrationPending` n'est positionné qu'une
+fois `loadUserData()` terminé, alors que l'app devient visible un peu avant la
+fin de ce chargement. Il existe donc une toute petite fenêtre (une poignée de
+centaines de millisecondes) où une action très rapide de l'utilisateur juste
+après connexion pourrait théoriquement écrire au mauvais endroit. Risque jugé
+négligeable en pratique (aucune action utile n'est possible avant que les
+données soient chargées et affichées), mais à garder en tête.
+
+### Import JSON (restoreJSON) et restauration de sauvegarde serveur : le journal
+
+Même sujet que ci-dessus, cas particulier : le journal d'activité restauré par
+`restoreJSON()` (import-export.js) ou `restoreServerBackup()` (Vue Admin) n'est
+plus couvert par `saveState('all')`, qui ne gère que les 7 domaines + meta.
+Un nouveau helper partagé, `replaceActivityLogFull(etablissementId, isMigrated, log)`
+dans `firebase-init.js`, remplace entièrement le journal cloud (ancien format
+ou sous-collection selon le cas) — utilisé par les deux fonctions de
+restauration. Exposé aussi via `window.restoreActivityLogFull(logArray)` pour
+l'établissement de l'utilisateur connecté.
+
+## Secteurs & Économat (stock par emplacement)
+
+Le stock d'un article n'est plus un chiffre unique global — chaque article a
+maintenant un stock **par emplacement** (`stockParSecteur: {Économat: N,
+Cuisine: N, ...}`). Rétrocompatible : un article créé avant cette mise à jour
+n'a pas encore ce champ — `getStock(art)` retombe alors sur l'ancien calcul
+(`total_entrant - total_sortant`), qui représente l'Économat par définition
+(les secteurs n'existaient pas avant).
+
+**Emplacements** : liste configurable dans Paramètres. "Économat" toujours
+présent, non supprimable. Un secteur ne peut être supprimé que si son stock
+est à zéro partout (transfert retour vers l'Économat d'abord).
+
+**Entrée fournisseur** : nouveau champ "Destination" (Économat par défaut, ou
+un secteur direct si le fournisseur livre directement en cuisine/salle...).
+
+**Sortie** : le champ "secteur" (texte libre existant, avec suggestions) sert
+maintenant à la fois d'étiquette de reporting ET de véritable destination de
+stock : si le texte saisi correspond à un emplacement défini, le stock de CET
+emplacement est déduit ; sinon (motifs non géographiques comme "Perte",
+"Correction"), déduction sur l'Économat par défaut — comportement identique
+à avant.
+
+**Ventes** : utilisent déjà un champ "secteur" existant (où la vente a eu
+lieu) — réutilisé directement pour déduire le bon stock.
+
+**Nouveau : Transferts internes** (`js/transferts.js`, nouvelle page +
+sous-collection Firestore `data/transferts`) — déplacer du stock d'un
+emplacement à un autre (ex: Économat → Cuisine), avec vérification du stock
+disponible à l'origine avant validation.
+
+**Rattachement de l'historique** (Paramètres → bouton "Rattacher l'historique
+aux emplacements") : renomme les anciennes valeurs "secteur" en texte libre
+(ex: "cuisine") pour qu'elles correspondent exactement aux emplacements
+définis. **Portée limitée, volontairement** : ça corrige l'affichage/les
+filtres, mais ne recalcule PAS rétroactivement le stock par secteur des
+mouvements passés (impossible à faire de façon fiable sans reconstituer tout
+l'historique chronologique) — tout le stock antérieur à cette mise à jour
+reste comptabilisé à l'Économat.
+
+### Ce qui n'est PAS fait dans cette passe
+
+- **Rôle "Responsable de secteur"** (accès restreint à un seul secteur, ne
+  voit ni les autres secteurs ni les prix fournisseurs/administration) —
+  demandé mais pas encore implémenté. C'est un chantier à part entière
+  (nouvelle structure accountLinks avec un champ secteur, nouvelles règles
+  Firestore, masquage conditionnel de pages existantes) qui mérite sa propre
+  passe dédiée, comme les règles de sécurité P1.
+- Les factures groupées (`saveFactureEntree`/`saveFactureSortie`) utilisent
+  une seule destination/secteur pour toutes les lignes de la facture — pas
+  de destination différente ligne par ligne.

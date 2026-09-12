@@ -69,7 +69,7 @@ document.querySelectorAll('.nav-item').forEach(n => {
 const t = n.textContent;
 if ((id==='aujourdhui' && t.includes('Aujourd')) || (id==='dashboard' && t.includes('bord')) || (id==='articles' && t.includes('Articles')) ||
 (id==='alertes' && t.includes('Alertes')) || (id==='entrees' && t.includes('Entrées')) ||
-(id==='sorties' && t.includes('Sorties')) || (id==='ventes' && t.includes('Ventes')) || (id==='commandes' && t.includes('commande')) || (id==='historiqueprix' && t.includes('Historique des prix')) || (id==='fournisseurs' && t.includes('Fournisseurs')) ||
+(id==='sorties' && t.includes('Sorties')) || (id==='transferts' && t.includes('Transferts')) || (id==='ventes' && t.includes('Ventes')) || (id==='commandes' && t.includes('commande')) || (id==='historiqueprix' && t.includes('Historique des prix')) || (id==='fournisseurs' && t.includes('Fournisseurs')) ||
 (id==='import' && t.includes('Import')) || (id==='journal' && t.includes('Journal')) || (id==='parametres' && t.includes('Paramètres')) ||
 (id==='analyse' && t.includes('Consommation')) ||
 (id==='foodcost' && t.includes('Food Cost')) ||
@@ -83,6 +83,7 @@ if (id==='articles') { populateArticleFilters(); renderArticles(); }
 if (id==='alertes') renderAlertes();
 if (id==='entrees') { populateEntreeFilters(); renderEntrees(); }
 if (id==='sorties') { populateSortieFilters(); renderSorties(); }
+if (id==='transferts') renderTransferts();
 if (id==='ventes') { populateVenteFilters(); renderVentes(); }
 if (id==='commandes') { populateCommandeFilters(); renderCommandes(); }
 if (id==='historiqueprix') { populateHistoriquePrixFilters(); renderHistoriquePrix(); }
@@ -157,6 +158,12 @@ document.getElementById('rec-pv-val').textContent='—';
 document.getElementById('rec-marge-val').textContent='—';
 document.getElementById('modal-recette-title').textContent='🍽 Nouvelle Recette';
 }
+if (id==='modal-transfert') {
+document.getElementById('transfert-date').value = today();
+document.getElementById('transfert-article').value = '';
+document.getElementById('transfert-qte').value = '';
+document.getElementById('transfert-note').value = '';
+}
 document.getElementById(id).classList.add('open');
 }
 
@@ -165,6 +172,7 @@ document.getElementById(id).classList.remove('open');
 if (id==='modal-article') { document.getElementById('art-edit-id').value=''; document.getElementById('modal-article-title').textContent='▦ Nouvel Article'; document.getElementById('art-save-btn').textContent='Créer l\'article'; document.getElementById('art-designation').value=''; document.getElementById('art-categorie').value=''; document.getElementById('art-unite').value=''; document.getElementById('art-stock-min').value='0'; document.getElementById('art-stock-initial').value='0'; document.getElementById('art-prix-achat').value=''; document.getElementById('art-prix-vente').value=''; document.getElementById('art-code-barre').value=''; document.getElementById('art-marge-preview').textContent=''; }
 if (id==='modal-fournisseur') { document.getElementById('four-edit-nom').value=''; document.getElementById('modal-four-title').textContent='◉ Nouveau Fournisseur'; document.getElementById('four-save-btn').textContent='Enregistrer'; ['four-nom','four-ifu','four-rc','four-adresse','four-email','four-tel','four-cat'].forEach(x=>document.getElementById(x).value=''); }
 if (id==='modal-sortie') { const sa=document.getElementById('sortie-article'); if(sa){sa.value='';sa.disabled=false;} ['sortie-date','sortie-qte','sortie-secteur','sortie-cat'].forEach(x=>{const el=document.getElementById(x);if(el)el.value='';}); }
+if (id==='modal-transfert') { ['transfert-article','transfert-date','transfert-qte','transfert-note'].forEach(x=>{const el=document.getElementById(x);if(el)el.value='';}); }
 }
 
 function populateSelects() {
@@ -173,6 +181,7 @@ const dlOpts = sorted.map(a => `<option value="${a.designation}">`).join('');
 const dla = document.getElementById('dl-entree-article'); if(dla) dla.innerHTML = dlOpts;
 const dls = document.getElementById('dl-sortie-article'); if(dls) dls.innerHTML = dlOpts;
 const dlf = document.getElementById('dl-facture-article'); if(dlf) dlf.innerHTML = dlOpts;
+const dlt = document.getElementById('dl-transfert-article'); if(dlt) dlt.innerHTML = dlOpts;
 const fOpts = '<option value="">— Aucun —</option>' + state.fournisseurs.map(f => `<option value="${f.nom}">${f.nom}</option>`).join('');
 const efEl = document.getElementById('entree-fournisseur'); if(efEl) efEl.innerHTML = fOpts;
 const fefEl = document.getElementById('facture-entree-fournisseur'); if(fefEl) fefEl.innerHTML = fOpts;
@@ -180,7 +189,12 @@ const cats = allCategories();
 const catOptsHTML = (sel) => '<option value="">— Aucune —</option>' + cats.map(c => `<option value="${c}"${c===sel?' selected':''}>${c}</option>`).join('');
 const acEl = document.getElementById('art-categorie'); if(acEl) acEl.innerHTML = catOptsHTML(acEl.value);
 const scEl = document.getElementById('sortie-cat'); if(scEl) scEl.innerHTML = catOptsHTML(scEl.value);
-const slEl = document.getElementById('secteurs-list'); if(slEl) slEl.innerHTML = allSecteurs().map(s => `<option value="${s}">`).join('');
+const slEl = document.getElementById('secteurs-list'); if(slEl) slEl.innerHTML = [...new Set([...allEmplacements(), ...allSecteurs()])].map(s => `<option value="${s}">`).join('');
+const empOptsHTML = (sel) => allEmplacements().map(e => `<option value="${e}"${e===sel?' selected':''}>${e}</option>`).join('');
+const edEl = document.getElementById('entree-destination'); if(edEl) edEl.innerHTML = empOptsHTML(edEl.value||'Économat');
+const fedEl = document.getElementById('facture-entree-destination'); if(fedEl) fedEl.innerHTML = empOptsHTML(fedEl.value||'Économat');
+const toEl = document.getElementById('transfert-origine'); if(toEl) toEl.innerHTML = empOptsHTML(toEl.value);
+const tdEl = document.getElementById('transfert-destination'); if(tdEl) tdEl.innerHTML = empOptsHTML(tdEl.value);
 }
 
 function globalSearch() {

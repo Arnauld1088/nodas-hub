@@ -1,15 +1,15 @@
 
 import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, enableIndexedDbPersistence, serverTimestamp, onSnapshot, query, where, orderBy, limit, writeBatch } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, enableIndexedDbPersistence, serverTimestamp, onSnapshot, query, where, orderBy, limit, writeBatch, arrayUnion } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBHRPA87TEbD5kFvwDRsS7-7Vh8hzbI6Fo",
-  authDomain: "gestion-de-stock-da97d.firebaseapp.com",
-  projectId: "gestion-de-stock-da97d",
-  storageBucket: "gestion-de-stock-da97d.firebasestorage.app",
-  messagingSenderId: "528932535650",
-  appId: "1:528932535650:web:c8257c5eeec0caf438003b"
+  apiKey: "AIzaSyBcUeC7x4E4iVUTa2_ZDgZkO2nfSb0nfF8",
+  authDomain: "nodas-hub.firebaseapp.com",
+  projectId: "nodas-hub",
+  storageBucket: "nodas-hub.firebasestorage.app",
+  messagingSenderId: "380292298288",
+  appId: "1:380292298288:web:59eaeb348f2ea4d58b9ff5"
 };
 
 const fbApp = initializeApp(firebaseConfig);
@@ -184,7 +184,8 @@ async function resolveAccountContext(user) {
 // ventes/commandes/journal. Voir README.md pour le schéma complet.
 const DOMAIN_ARRAY_KEYS = {
   articles: 'articles', purchases: 'purchases', sorties: 'sorties',
-  fournisseurs: 'fournisseurs', recettes: 'recettes', ventes: 'ventes', commandes: 'commandes'
+  fournisseurs: 'fournisseurs', recettes: 'recettes', ventes: 'ventes', commandes: 'commandes',
+  transferts: 'transferts'
 };
 let cloudSaveTimers = {};
 let _pendingDomains = new Set();
@@ -215,6 +216,7 @@ async function cloudSaveNow(domain) {
     if (domain === 'meta') {
       const data = {
         categoriesArticles: state.categoriesArticles || [],
+        emplacements: state.emplacements || ['Économat'],
         categoriesOffert: state.categoriesOffert || [],
         notificationEmails: state.notificationEmails || [],
         lastAlertEmailDate: state.lastAlertEmailDate || '',
@@ -230,10 +232,20 @@ async function cloudSaveNow(domain) {
       await setDoc(doc(db, 'users', window._etablissementId), data, { merge: true });
     } else if (DOMAIN_ARRAY_KEYS[domain]) {
       const key = DOMAIN_ARRAY_KEYS[domain];
-      await setDoc(doc(db, 'users', window._etablissementId, 'data', domain), {
-        items: state[key] || [],
-        updatedAt: serverTimestamp()
-      });
+      if (window._migrationPending) {
+        // Établissement pas encore migré : continuer à écrire à l'ANCIEN format (champ plat
+        // sur le document principal), exactement comme avant P1. Écrire directement dans la
+        // sous-collection ici casserait silencieusement les établissements non migrés : la
+        // prochaine lecture (loadUserData, tant que migratedAt est absent) ne regarde que les
+        // champs plats et ne verrait jamais ces écritures.
+        await setDoc(doc(db, 'users', window._etablissementId), {
+          [key]: state[key] || [], updatedAt: serverTimestamp()
+        }, { merge: true });
+      } else {
+        await setDoc(doc(db, 'users', window._etablissementId, 'data', domain), {
+          items: state[key] || [], updatedAt: serverTimestamp()
+        });
+      }
     } else {
       console.warn('cloudSaveNow: domaine inconnu ignoré :', domain);
       return;
@@ -252,17 +264,54 @@ window.cloudSaveNow = cloudSaveNow;
 
 // Journal d'activité : chaque entrée est désormais un document individuel dans la
 // sous-collection users/{id}/activityLog — écriture immédiate (petit document), pas de
-// plafond, et suppression possible entrée par entrée.
+// plafond, et suppression possible entrée par entrée. Pour un établissement PAS ENCORE
+// migré, on continue d'écrire dans le tableau plat (ancien format) via arrayUnion, pour
+// rester lisible par loadUserData() tant que migratedAt est absent.
 window.saveActivityLogEntry = async function(entry) {
   if (!window._currentUser || !window._etablissementId) return;
   try {
-    await setDoc(doc(db, 'users', window._etablissementId, 'activityLog', entry.id), {
-      ts: entry.ts, user: entry.user, action: entry.action, label: entry.label,
-      createdAt: serverTimestamp()
-    });
+    if (window._migrationPending) {
+      await setDoc(doc(db, 'users', window._etablissementId), {
+        activityLog: arrayUnion(entry)
+      }, { merge: true });
+    } else {
+      await setDoc(doc(db, 'users', window._etablissementId, 'activityLog', entry.id), {
+        ts: entry.ts, user: entry.user, action: entry.action, label: entry.label,
+        createdAt: serverTimestamp()
+      });
+    }
   } catch (e) {
     console.error("Erreur d'écriture du journal d'activité:", e);
   }
+};
+
+// Remplace ENTIÈREMENT le journal d'activité d'un établissement (pas incrémental —
+// l'existant est écrasé). Utilisé par la restauration d'une sauvegarde serveur et par
+// l'import d'une sauvegarde JSON. isMigrated est passé explicitement (pas déduit de
+// window._migrationPending) car cette fonction peut agir sur un établissement qui n'est
+// pas celui de l'utilisateur actuellement connecté (cas de la Vue Admin Plateforme).
+async function replaceActivityLogFull(etablissementId, isMigrated, log) {
+  log = log || [];
+  if (isMigrated) {
+    await deleteCollectionBatched(collection(db, 'users', etablissementId, 'activityLog'));
+    for (let i = 0; i < log.length; i += 400) {
+      const batch = writeBatch(db);
+      log.slice(i, i+400).forEach(entry => {
+        const entryId = entry.id || ('log-'+(entry.ts||Date.now())+'-'+Math.random().toString(36).slice(2,6));
+        batch.set(doc(db, 'users', etablissementId, 'activityLog', entryId), {
+          ts: entry.ts, user: entry.user, action: entry.action, label: entry.label, createdAt: serverTimestamp()
+        });
+      });
+      await batch.commit();
+    }
+  } else {
+    await setDoc(doc(db, 'users', etablissementId), { activityLog: log }, { merge: true });
+  }
+}
+// Version pour l'établissement de l'utilisateur actuellement connecté (import JSON local).
+window.restoreActivityLogFull = async function(logArray) {
+  if (!window._currentUser || !window._etablissementId) return;
+  await replaceActivityLogFull(window._etablissementId, !window._migrationPending, logArray);
 };
 
 // Supprime tous les documents d'une (sous-)collection par lots de 400 (limite Firestore :
@@ -279,11 +328,16 @@ async function deleteCollectionBatched(colRef) {
   }
 }
 
-// Vide le journal d'activité côté cloud : supprime tous les documents de la sous-collection.
+// Vide le journal d'activité côté cloud : ancien format = vider le tableau plat, nouveau
+// format = supprimer tous les documents de la sous-collection.
 window.clearActivityLogCloud = async function() {
   if (!window._currentUser || !window._etablissementId) return;
   try {
-    await deleteCollectionBatched(collection(db, 'users', window._etablissementId, 'activityLog'));
+    if (window._migrationPending) {
+      await setDoc(doc(db, 'users', window._etablissementId), { activityLog: [] }, { merge: true });
+    } else {
+      await deleteCollectionBatched(collection(db, 'users', window._etablissementId, 'activityLog'));
+    }
   } catch (e) {
     console.error("Erreur lors du vidage du journal d'activité:", e);
   }
@@ -346,6 +400,7 @@ async function loadEstablishmentSubcollections(metaData) {
     state.activityLog = [];
   }
   state.categoriesArticles = metaData.categoriesArticles || [];
+  state.emplacements = (metaData.emplacements && metaData.emplacements.length) ? metaData.emplacements : ['Économat'];
   state.categoriesOffert = metaData.categoriesOffert || [];
   state.notificationEmails = metaData.notificationEmails || [];
   state.lastAlertEmailDate = metaData.lastAlertEmailDate || '';
@@ -567,7 +622,7 @@ window.writeMailDoc = async function(to, subject, text, html) {
 function resetLocalState() {
   state.articles = []; state.purchases = []; state.sorties = [];
   state.fournisseurs = []; state.recettes = []; state.ventes = []; state.commandes = []; state.activityLog = [];
-  state.categoriesArticles = []; state.categoriesOffert = [];
+  state.categoriesArticles = []; state.categoriesOffert = []; state.emplacements = ['Économat']; state.transferts = [];
   state.notificationEmails = []; state.lastAlertEmailDate = '';
   state.members = []; state.foodCost = null;
   state.appName = 'STOCK'; state.appSub = 'Gestion de Stock';
@@ -631,6 +686,8 @@ async function loadUserData(user) {
         state.commandes = p.commandes || [];
         state.activityLog = p.activityLog || [];
         state.categoriesArticles = p.categoriesArticles || [];
+        state.emplacements = (p.emplacements && p.emplacements.length) ? p.emplacements : ['Économat'];
+        state.transferts = p.transferts || [];
         state.categoriesOffert = p.categoriesOffert || [];
         state.notificationEmails = p.notificationEmails || [];
         state.lastAlertEmailDate = p.lastAlertEmailDate || '';
@@ -661,6 +718,8 @@ async function loadUserData(user) {
       state.commandes = d.commandes || [];
       state.activityLog = d.activityLog || [];
       state.categoriesArticles = d.categoriesArticles || [];
+      state.emplacements = (d.emplacements && d.emplacements.length) ? d.emplacements : ['Économat'];
+      state.transferts = d.transferts || [];
       state.categoriesOffert = d.categoriesOffert || [];
       state.notificationEmails = d.notificationEmails || [];
       state.lastAlertEmailDate = d.lastAlertEmailDate || '';
@@ -689,6 +748,8 @@ async function loadUserData(user) {
           state.commandes = p.commandes || [];
           state.activityLog = p.activityLog || [];
           state.categoriesArticles = p.categoriesArticles || [];
+        state.emplacements = (p.emplacements && p.emplacements.length) ? p.emplacements : ['Économat'];
+        state.transferts = p.transferts || [];
           state.categoriesOffert = p.categoriesOffert || [];
           state.notificationEmails = p.notificationEmails || [];
           state.lastAlertEmailDate = p.lastAlertEmailDate || '';
@@ -933,22 +994,12 @@ window.restoreServerBackup = async function(etablissementId, backupData) {
           items: parsed[key] || [], updatedAt: serverTimestamp()
         });
       }
-      // Le journal de la sauvegarde remplace entièrement l'existant (vidage puis réécriture).
-      await deleteCollectionBatched(collection(db, 'users', etablissementId, 'activityLog'));
-      const log = parsed.activityLog || [];
-      for (let i = 0; i < log.length; i += 400) {
-        const batch = writeBatch(db);
-        log.slice(i, i+400).forEach(entry => {
-          const entryId = entry.id || ('log-'+(entry.ts||Date.now())+'-'+Math.random().toString(36).slice(2,6));
-          batch.set(doc(db, 'users', etablissementId, 'activityLog', entryId), {
-            ts: entry.ts, user: entry.user, action: entry.action, label: entry.label, createdAt: serverTimestamp()
-          });
-        });
-        await batch.commit();
-      }
+      // Le journal de la sauvegarde remplace entièrement l'existant.
+      await replaceActivityLogFull(etablissementId, true, parsed.activityLog);
       // merge:true + pas de champ migratedAt dans l'objet => le flag reste intact.
       await setDoc(metaRef, {
         categoriesArticles: parsed.categoriesArticles || [],
+        emplacements: (parsed.emplacements && parsed.emplacements.length) ? parsed.emplacements : ['Économat'],
         categoriesOffert: parsed.categoriesOffert || [],
         notificationEmails: parsed.notificationEmails || [],
         lastAlertEmailDate: parsed.lastAlertEmailDate || '',

@@ -70,17 +70,21 @@ if (type === 'inventaire') {
 const diff = qte - stockActuel;
 if (diff > 0) {
 art.total_entrant = (art.total_entrant||0) + diff;
+ajusterStockEmplacement(art, 'Économat', diff);
 state.purchases.push({ date:dateStr, article:art.designation, quantite:diff, prix_ttc:0, total:0, fournisseur:'', facture:'CORRECTION', categorie:art.categorie||'', note:`Correction inventaire : ${motif}` });
 } else if (diff < 0) {
 art.total_sortant = (art.total_sortant||0) + Math.abs(diff);
+ajusterStockEmplacement(art, 'Économat', diff);
 state.sorties.push({ date:dateStr, article:art.designation, quantite:Math.abs(diff), secteur:'Correction', categorie:art.categorie||'', note:`Correction inventaire : ${motif}` });
 }
 } else if (type === 'ajout') {
 art.total_entrant = (art.total_entrant||0) + qte;
+ajusterStockEmplacement(art, 'Économat', qte);
 state.purchases.push({ date:dateStr, article:art.designation, quantite:qte, prix_ttc:0, total:0, fournisseur:'', facture:'CORRECTION', categorie:art.categorie||'', note:`Ajout : ${motif}` });
 } else {
 if (qte > stockActuel) { showToast('⚠ Retrait supérieur au stock disponible', 'var(--red)'); return; }
 art.total_sortant = (art.total_sortant||0) + qte;
+ajusterStockEmplacement(art, 'Économat', -qte);
 state.sorties.push({ date:dateStr, article:art.designation, quantite:qte, secteur:'Correction', categorie:art.categorie||'', note:`Retrait : ${motif}` });
 }
 logActivity('correction', 'Correction stock : '+art.designation+' → '+fmt(getStock(art))+' ('+motif+')');

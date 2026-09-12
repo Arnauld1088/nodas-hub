@@ -124,7 +124,7 @@ if (decompte) {
 const ingArt = state.articles.find(a=>a.designation===ing.article);
 const ingQte = ing.quantite * qte;
 state.sorties.push({ date, article:ing.article, quantite:ingQte, categorie: ing.categorie||(ingArt?ingArt.categorie:''), secteur, venteId, recette:r.nom });
-if (ingArt) ingArt.total_sortant = (ingArt.total_sortant||0) + ingQte;
+if (ingArt) { ingArt.total_sortant = (ingArt.total_sortant||0) + ingQte; ajusterStockEmplacement(ingArt, resolveEmplacementSortie(secteur), -ingQte); }
 });
 }
 } else {
@@ -134,6 +134,7 @@ nom = a.designation;
 if (decompte) {
 state.sorties.push({ date, article:a.designation, quantite:qte, categorie:a.categorie||'', secteur, venteId });
 a.total_sortant = (a.total_sortant||0) + qte;
+ajusterStockEmplacement(a, resolveEmplacementSortie(secteur), -qte);
 }
 }
 state.ventes.push({ id:venteId, date, type, nom, quantite:qte, statut, categorie_offert: statut==='offert'?catOffert:'', prix_unitaire:prix, total: prix*qte, secteur, note, decompte_stock: decompte });
@@ -149,7 +150,7 @@ if (!confirm(`Supprimer cette vente (${v.nom}) ? Le stock déduit sera restauré
 const linked = state.sorties.filter(s=>s.venteId===id);
 linked.forEach(s => {
 const art = state.articles.find(a=>a.designation===s.article);
-if (art) art.total_sortant = Math.max(0,(art.total_sortant||0) - s.quantite);
+if (art) { art.total_sortant = Math.max(0,(art.total_sortant||0) - s.quantite); ajusterStockEmplacement(art, resolveEmplacementSortie(s.secteur), s.quantite); }
 });
 state.sorties = state.sorties.filter(s=>s.venteId!==id);
 state.ventes = state.ventes.filter(x=>x.id!==id);

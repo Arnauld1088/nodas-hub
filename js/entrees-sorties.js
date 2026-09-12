@@ -11,11 +11,19 @@ const prix = parseFloat(document.getElementById('entree-prix').value) || 0;
 const facture = document.getElementById('entree-facture').value;
 const fournisseur = document.getElementById('entree-fournisseur').value;
 const note = document.getElementById('entree-note').value;
+// Destination : champ injecté dynamiquement dans le modal (voir ui-core.js) — "Économat" par
+// défaut si l'élément n'existe pas encore (rétrocompatibilité avant l'injection au premier rendu).
+const destEl = document.getElementById('entree-destination');
+const destination = (destEl ? destEl.value : '') || 'Économat';
 if (!article || !date || isNaN(qte) || qte <= 0) { showToast('⚠ Remplissez les champs obligatoires','#f66'); return; }
 const art = state.articles.find(a => a.designation.toLowerCase()===article.toLowerCase());
-state.purchases.push({ date, facture, article, quantite:qte, prix_ttc:prix, total:prix*qte, fournisseur, categorie: art?art.categorie:'', note });
-if (art) { art.total_entrant = (art.total_entrant||0) + qte; if (prix>0) art.prix_achat = prix; }
-logActivity('entree', 'Entrée : '+article+' (+'+fmt(qte)+')'+(fournisseur?' — '+fournisseur:''));
+state.purchases.push({ date, facture, article, quantite:qte, prix_ttc:prix, total:prix*qte, fournisseur, categorie: art?art.categorie:'', note, destination });
+if (art) {
+art.total_entrant = (art.total_entrant||0) + qte;
+if (prix>0) art.prix_achat = prix;
+ajusterStockEmplacement(art, destination, qte);
+}
+logActivity('entree', 'Entrée : '+article+' (+'+fmt(qte)+')'+(fournisseur?' — '+fournisseur:'')+(destination!=='Économat'?' → '+destination:''));
 saveState(['purchases','articles']); closeModal('modal-entree');
 showToast(`✓ Entrée enregistrée : ${article} (${fmt(qte)})`);
 renderDashboard();
@@ -30,7 +38,13 @@ const cat = document.getElementById('sortie-cat').value;
 if (!article || !date || isNaN(qte) || qte <= 0) { showToast('⚠ Remplissez les champs obligatoires','#f66'); return; }
 const art = state.articles.find(a => a.designation.toLowerCase()===article.toLowerCase());
 state.sorties.push({ date, article, quantite:qte, categorie: cat || (art?art.categorie:''), secteur });
-if (art) art.total_sortant = (art.total_sortant||0) + qte;
+// Si le texte saisi correspond à un emplacement structuré (Cuisine, Bar...), on déduit son
+// stock à lui. Sinon (motifs comme "Perte", "Correction", texte libre non reconnu), on déduit
+// l'Économat par défaut — comportement identique à avant l'introduction des secteurs.
+if (art) {
+art.total_sortant = (art.total_sortant||0) + qte;
+ajusterStockEmplacement(art, resolveEmplacementSortie(secteur), -qte);
+}
 logActivity('sortie', 'Sortie : '+article+' (-'+fmt(qte)+')'+(secteur?' — '+secteur:''));
 saveState(['sorties','articles']); closeModal('modal-sortie');
 showToast(`✓ Sortie enregistrée : ${article} (${fmt(qte)})`);
@@ -70,6 +84,8 @@ function saveFactureEntree() {
 const date = document.getElementById('facture-entree-date').value;
 const fournisseur = document.getElementById('facture-entree-fournisseur').value;
 const facture = document.getElementById('facture-entree-numero').value.trim();
+const destEl = document.getElementById('facture-entree-destination');
+const destination = (destEl ? destEl.value : '') || 'Économat';
 if (!date) { showToast('⚠ Date obligatoire','var(--red)'); return; }
 const rows = [...document.querySelectorAll('#facture-entree-lines .ing-row')];
 let count = 0;
@@ -79,8 +95,8 @@ const qte = parseFloat(row.querySelector('.fe-qte')?.value) || 0;
 const prix = parseFloat(row.querySelector('.fe-prix')?.value) || 0;
 if (!article || qte<=0) return;
 const art = state.articles.find(a => a.designation.toLowerCase()===article.toLowerCase());
-state.purchases.push({ date, facture, article, quantite:qte, prix_ttc:prix, total:prix*qte, fournisseur, categorie: art?art.categorie:'' });
-if (art) { art.total_entrant = (art.total_entrant||0) + qte; if (prix>0) art.prix_achat = prix; }
+state.purchases.push({ date, facture, article, quantite:qte, prix_ttc:prix, total:prix*qte, fournisseur, categorie: art?art.categorie:'', destination });
+if (art) { art.total_entrant = (art.total_entrant||0) + qte; if (prix>0) art.prix_achat = prix; ajusterStockEmplacement(art, destination, qte); }
 count++;
 });
 if (!count) { showToast('⚠ Ajoutez au moins une ligne valide (article + quantité)','var(--red)'); return; }
@@ -117,7 +133,7 @@ const cat = row.querySelector('.fs-cat')?.value.trim() || '';
 if (!article || qte<=0) return;
 const art = state.articles.find(a => a.designation.toLowerCase()===article.toLowerCase());
 state.sorties.push({ date, article, quantite:qte, categorie: cat || (art?art.categorie:''), secteur, bon });
-if (art) art.total_sortant = (art.total_sortant||0) + qte;
+if (art) { art.total_sortant = (art.total_sortant||0) + qte; ajusterStockEmplacement(art, resolveEmplacementSortie(secteur), -qte); }
 count++;
 });
 if (!count) { showToast('⚠ Ajoutez au moins une ligne valide (article + quantité)','var(--red)'); return; }

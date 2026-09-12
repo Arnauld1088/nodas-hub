@@ -26,6 +26,7 @@ pageParam.insertBefore(banner, pageParam.firstChild);
 banner.remove();
 }
 }
+renderEmplacementsSection();
 const syncDescEl = document.getElementById('param-sync-desc');
 if (syncDescEl) syncDescEl.textContent = document.getElementById('sync-label')?.textContent || '—';
 renderCategoriesArticlesList();
@@ -71,6 +72,96 @@ document.getElementById('stats-grid').innerHTML = stats.map(s=>`
 <div style="font-family:'Playfair Display',serif;font-size:24px;font-weight:700">${s.val}</div>
 <div style="font-size:11px;color:var(--text3);margin-top:2px">${s.label}</div>
 </div>`).join('');
+}
+
+// ===== Emplacements (Économat + secteurs) =====
+// Injecté dynamiquement dans la page Paramètres (pas de modification d'index.html requise),
+// juste après le bandeau de migration s'il est présent, sinon en premier dans la page.
+function renderEmplacementsSection() {
+const pageParam = document.getElementById('page-parametres');
+if (!pageParam) return;
+ensureEmplacementsDefaults();
+let box = document.getElementById('param-emplacements-box');
+if (!box) {
+box = document.createElement('div');
+box.id = 'param-emplacements-box';
+box.style.cssText = 'margin-bottom:20px';
+box.innerHTML = `
+<h4 style="margin-bottom:6px">Emplacements (Économat &amp; secteurs)</h4>
+<p style="font-size:12px;color:var(--text3);margin-bottom:10px">
+"Économat" est le magasin central, toujours présent. Ajoutez vos secteurs (Cuisine, Restaurant, Bar...) —
+ils pourront recevoir des transferts internes et avoir leur propre stock.
+</p>
+<div id="emplacements-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
+<div style="display:flex;gap:8px;margin-bottom:10px">
+<input type="text" id="new-emplacement" placeholder="Nom du secteur (ex: Cuisine)" style="flex:1">
+<button type="button" class="btn btn-outline btn-sm" onclick="addEmplacement()">Ajouter</button>
+</div>
+<button type="button" class="btn btn-outline btn-sm" onclick="reconcilierHistoriqueSecteurs()">Rattacher l'historique aux emplacements</button>
+<p style="font-size:11px;color:var(--text3);margin-top:6px">
+Renomme les anciennes valeurs "secteur" en texte libre (ex: "cuisine") pour qu'elles correspondent
+exactement aux emplacements ci-dessus. N'affecte que l'affichage/les filtres — ne recalcule pas
+rétroactivement le stock par secteur des mouvements passés.
+</p>`;
+const banner = document.getElementById('param-migration-banner');
+if (banner && banner.nextSibling) pageParam.insertBefore(box, banner.nextSibling);
+else pageParam.insertBefore(box, pageParam.firstChild);
+}
+renderEmplacementsList();
+}
+
+function renderEmplacementsList() {
+const el = document.getElementById('emplacements-list');
+if (!el) return;
+const secteurs = allEmplacements();
+el.innerHTML = secteurs.map(e => {
+const protege = e === 'Économat';
+return `<span class="ui-pill">${e}${protege ? '' : `<button type="button" onclick="removeEmplacement('${e.replace(/'/g,"\\'")}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;line-height:1;padding:0;margin-left:2px">×</button>`}</span>`;
+}).join('');
+}
+
+function addEmplacement() {
+const input = document.getElementById('new-emplacement');
+const v = (input.value||'').trim();
+if (!v) return;
+if (v.toLowerCase() === 'économat' || v.toLowerCase() === 'economat') { showToast('⚠ "Économat" existe déjà (magasin central)', 'var(--orange)'); return; }
+if (allEmplacements().some(e => e.toLowerCase()===v.toLowerCase())) { showToast('⚠ Cet emplacement existe déjà','var(--orange)'); return; }
+state.emplacements.push(v);
+input.value = '';
+logActivity('emplacement_add', 'Emplacement ajouté : '+v);
+saveState('meta'); renderEmplacementsList();
+showToast('✓ Emplacement ajouté : '+v);
+}
+
+function removeEmplacement(emplacement) {
+if (emplacement === 'Économat') { showToast('⚠ "Économat" ne peut pas être supprimé', 'var(--red)'); return; }
+const nbStock = state.articles.filter(a => getStock(a, emplacement) > 0).length;
+if (nbStock > 0) { showToast(`⚠ ${nbStock} article(s) ont encore du stock dans "${emplacement}" — videz-le d'abord (transfert retour vers l'Économat)`, 'var(--red)'); return; }
+if (!confirm(`Supprimer l'emplacement "${emplacement}" ?`)) return;
+state.emplacements = state.emplacements.filter(e => e!==emplacement);
+logActivity('emplacement_remove', 'Emplacement supprimé : '+emplacement);
+saveState('meta'); renderEmplacementsList();
+showToast('🗑 Emplacement supprimé');
+}
+
+function reconcilierHistoriqueSecteurs() {
+if (window.isEconome && window.isEconome()) { showToast('⚠ Réservé à l\'administrateur','var(--red)'); return; }
+const secteurs = allEmplacements().filter(e => e !== 'Économat');
+if (!secteurs.length) { showToast('⚠ Ajoutez d\'abord au moins un secteur ci-dessus', 'var(--orange)'); return; }
+function normalize(s) { return (s||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); }
+const mapNorm = {};
+secteurs.forEach(e => { mapNorm[normalize(e)] = e; });
+let count = 0;
+[state.sorties, state.ventes].forEach(arr => {
+(arr||[]).forEach(rec => {
+const n = normalize(rec.secteur);
+if (n && mapNorm[n] && rec.secteur !== mapNorm[n]) { rec.secteur = mapNorm[n]; count++; }
+});
+});
+if (count === 0) { showToast('Rien à rattacher — les libellés sont déjà cohérents avec vos emplacements'); return; }
+logActivity('secteur_reconciliation', `Rattachement historique : ${count} entrée(s) de sorties/ventes mises à jour`);
+saveState(['sorties','ventes']);
+showToast(`✓ ${count} entrée(s) d'historique rattachée(s) à vos emplacements`);
 }
 
 function renderCategoriesArticlesList() {

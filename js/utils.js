@@ -3,7 +3,49 @@
 // Extrait automatiquement de app.js (V6-24) — voir README.md
 // ============================================================
 
-function getStock(art) { return (art.total_entrant||0) - (art.total_sortant||0); }
+// ===== Stock par emplacement (Économat + secteurs) =====
+const EMPLACEMENT_DEFAUT = 'Économat';
+
+// Stock d'un article pour un emplacement donné. Sans argument, retourne l'Économat — TOUT le
+// code existant qui appelle getStock(art) sans préciser d'emplacement continue de fonctionner
+// à l'identique. Rétrocompatible : un article créé avant l'introduction des secteurs n'a pas
+// encore de stockParSecteur — on retombe alors sur l'ancien calcul global (total_entrant -
+// total_sortant), qui représente forcément du stock Économat puisque les secteurs n'existaient
+// pas encore.
+function getStock(art, emplacement) {
+emplacement = emplacement || EMPLACEMENT_DEFAUT;
+if (art.stockParSecteur && typeof art.stockParSecteur === 'object') {
+return art.stockParSecteur[emplacement] || 0;
+}
+return emplacement === EMPLACEMENT_DEFAUT ? ((art.total_entrant||0) - (art.total_sortant||0)) : 0;
+}
+
+// Ajoute (delta positif) ou retire (delta négatif) une quantité au stock d'un article, pour un
+// emplacement donné. Initialise stockParSecteur au premier appel (migration paresseuse : tout
+// le stock déjà existant est rattaché à l'Économat, jamais perdu).
+function ajusterStockEmplacement(art, emplacement, delta) {
+if (!art.stockParSecteur || typeof art.stockParSecteur !== 'object') {
+art.stockParSecteur = { [EMPLACEMENT_DEFAUT]: (art.total_entrant||0) - (art.total_sortant||0) };
+}
+emplacement = emplacement || EMPLACEMENT_DEFAUT;
+art.stockParSecteur[emplacement] = (art.stockParSecteur[emplacement] || 0) + delta;
+}
+
+// Liste des emplacements définis (Économat toujours en premier, jamais dupliqué).
+function allEmplacements() {
+const list = Array.isArray(state.emplacements) ? state.emplacements.filter(e => e !== EMPLACEMENT_DEFAUT) : [];
+return [EMPLACEMENT_DEFAUT, ...list];
+}
+
+// Résout un texte de "secteur" (champ libre historique) vers un emplacement structuré s'il
+// correspond (insensible à la casse), sinon retourne l'Économat par défaut — ce qui couvre
+// les motifs non géographiques (Perte, Correction...) exactement comme avant l'introduction
+// des secteurs.
+function resolveEmplacementSortie(secteurText) {
+const txt = (secteurText||'').trim().toLowerCase();
+const match = allEmplacements().find(e => e.toLowerCase() === txt);
+return match || EMPLACEMENT_DEFAUT;
+}
 
 function stockBadge(art) {
 const s = getStock(art);

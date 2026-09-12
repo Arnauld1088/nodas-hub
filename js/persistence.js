@@ -18,6 +18,8 @@ state.ventes = p.ventes || [];
 state.commandes = p.commandes || [];
 state.activityLog = p.activityLog || [];
 state.categoriesArticles = p.categoriesArticles || [];
+state.emplacements = (p.emplacements && p.emplacements.length) ? p.emplacements : ['Économat'];
+state.transferts = p.transferts || [];
 state.categoriesOffert = p.categoriesOffert || [];
 state.notificationEmails = p.notificationEmails || [];
 state.lastAlertEmailDate = p.lastAlertEmailDate || '';
@@ -36,7 +38,7 @@ ensureCategoriesDefaults();
 // 'all' déclenche une resynchronisation complète de tous les domaines (restauration JSON,
 // restauration d'un instantané local, réinitialisation...) — plus lourd, à réserver à ces
 // cas précis plutôt qu'aux mutations courantes.
-const SYNC_DOMAINS = ['articles','purchases','sorties','fournisseurs','recettes','ventes','commandes','meta'];
+const SYNC_DOMAINS = ['articles','purchases','sorties','fournisseurs','recettes','ventes','commandes','transferts','meta'];
 
 // saveState(domain) : sauvegarde locale (toujours complète, comme avant — localStorage n'a pas
 // la limite de 1 Mo de Firestore) + déclenche la synchro cloud du/des domaine(s) concerné(s).
@@ -49,7 +51,8 @@ localStorage.setItem('gestion_stock_v2', JSON.stringify({
 articles: state.articles, purchases: state.purchases,
 sorties: state.sorties, fournisseurs: state.fournisseurs, recettes: state.recettes,
 ventes: state.ventes, commandes: state.commandes, activityLog: state.activityLog,
-categoriesArticles: state.categoriesArticles, categoriesOffert: state.categoriesOffert,
+categoriesArticles: state.categoriesArticles, categoriesOffert: state.categoriesOffert, emplacements: state.emplacements,
+transferts: state.transferts,
 notificationEmails: state.notificationEmails, lastAlertEmailDate: state.lastAlertEmailDate,
 foodCost: state.foodCost,
 appName: state.appName, appSub: state.appSub,
@@ -112,6 +115,8 @@ state.ventes = p.ventes || [];
 state.commandes = p.commandes || [];
 state.activityLog = p.activityLog || [];
 state.categoriesArticles = p.categoriesArticles || [];
+state.emplacements = (p.emplacements && p.emplacements.length) ? p.emplacements : ['Économat'];
+state.transferts = p.transferts || [];
 state.categoriesOffert = p.categoriesOffert || [];
 state.notificationEmails = p.notificationEmails || [];
 state.lastAlertEmailDate = p.lastAlertEmailDate || '';
@@ -147,7 +152,16 @@ if (typeof window.saveActivityLogEntry === 'function') window.saveActivityLogEnt
 }
 
 // Catégories fermées (articles + offert) : pré-remplissage automatique à la première utilisation.
+// Emplacements (Économat + secteurs) : Économat doit toujours être présent, en premier, et
+// jamais dupliqué — quelle que soit la façon dont la liste a été modifiée entre-temps.
+function ensureEmplacementsDefaults() {
+if (!Array.isArray(state.emplacements)) state.emplacements = [];
+const autres = state.emplacements.filter(e => e && e !== 'Économat');
+state.emplacements = ['Économat', ...autres];
+}
+
 function ensureCategoriesDefaults() {
+ensureEmplacementsDefaults();
 if (!Array.isArray(state.categoriesArticles)) state.categoriesArticles = [];
 if (!state.categoriesArticles.length) {
 state.categoriesArticles = [...new Set((state.articles||[]).map(a => a.categorie).filter(Boolean))].sort();
