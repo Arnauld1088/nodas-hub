@@ -1,0 +1,36 @@
+{
+  "name": "nodas-hub-desktop",
+  "productName": "NODAS HUB",
+  "version": "1.0.0",
+  "description": "NODAS HUB — Gestion de stock hôtellerie (application de bureau)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "author": "Arnauld",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.nodashub.desktop",
+    "productName": "NODAS HUB",
+    "files": [
+      "main.js",
+      "../index.html",
+      "../css/**/*",
+      "../js/**/*",
+      "../assets/**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": { "target": "nsis" },
+    "mac": { "target": "dmg" },
+    "linux": { "target": "AppImage" }
+  }
+}

@@ -1,0 +1,97 @@
+// ═══════════════════════════════════════════════════════════════════
+// RÈGLES FIRESTORE — NODAS HUB — v3 (P1 : sous-collections)
+// ═══════════════════════════════════════════════════════════════════
+//
+// Où déployer : Firebase Console → projet gestion-de-stock-da97d
+//               → Firestore Database → onglet "Règles"
+//
+// Ce qui change par rapport à la v2 (REGLES_FIRESTORE_A_METTRE_A_JOUR_2.txt) :
+//   - Ajout de users/{id}/data/{domaine}   → les 7 domaines métier
+//     (articles, purchases, sorties, fournisseurs, recettes, ventes, commandes)
+//   - Ajout de users/{id}/activityLog/{entryId} → le journal, désormais
+//     un document par entrée au lieu d'un tableau dans le document principal
+//   - users/{id}/backups/{slot}, pairings/{pairId} et mail/{autoId} sont
+//     repris tels quels (déjà en place, déduits du code actuel — à comparer
+//     avec les règles réellement déployées dans la Console avant de remplacer,
+//     au cas où elles auraient légèrement évolué depuis la dernière sauvegarde
+//     de ce fichier).
+//
+// Principe conservé : un même "peut lire/écrire ce document" est réutilisé
+// partout via la fonction canAccessEtablissement(id) ci-dessous, pour éviter
+// de dupliquer (et donc risquer de désynchroniser) la logique d'accès.
+// -----------------------------------------------------------------
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Vrai si l'utilisateur connecté est : le propriétaire (uid == id de
+    // l'établissement), le super-admin plateforme, ou un compte économe/scanner
+    // lié à cet établissement via accountLinks.
+    function canAccessEtablissement(etablissementId) {
+      return request.auth != null && (
+        request.auth.uid == etablissementId ||
+        request.auth.token.email == 'arnsog@gmail.com' ||
+        (
+          exists(/databases/$(database)/documents/accountLinks/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/accountLinks/$(request.auth.uid)).data.etablissementId == etablissementId
+        )
+      );
+    }
+
+    match /accountLinks/{uid} {
+      allow read: if request.auth != null && (
+        request.auth.uid == uid ||
+        request.auth.token.email == 'arnsog@gmail.com'
+      );
+      allow create, update: if request.auth != null;
+      allow delete: if request.auth != null;
+    }
+
+    match /users/{etablissementId} {
+      // Document principal (allégé depuis P1) : appName, members, foodCost,
+      // catégories, migratedAt...
+      allow read, write: if canAccessEtablissement(etablissementId);
+
+      // ===== NOUVEAU (P1) : un document par domaine métier =====
+      // items: [...] — articles, purchases, sorties, fournisseurs, recettes,
+      // ventes, commandes. Même règle d'accès que le document parent : pas de
+      // restriction supplémentaire par rôle pour l'instant (l'économe/scanner
+      // a accès à tous les domaines, comme avant P1 — restreindre par rôle ici
+      // est un chantier possible plus tard, maintenant que la structure le permet).
+      match /data/{domaine} {
+        allow read, write: if canAccessEtablissement(etablissementId);
+      }
+
+      // ===== NOUVEAU (P1) : journal d'activité, un document par entrée =====
+      // Écriture seule à la création (pas de update/delete individuel prévu
+      // côté app, sauf le vidage complet qui passe par clearActivityLogCloud
+      // et donc par delete ligne par ligne — d'où allow delete ici aussi).
+      match /activityLog/{entryId} {
+        allow read, create, delete: if canAccessEtablissement(etablissementId);
+      }
+
+      // Sauvegardes serveur automatiques (déjà en place avant P1).
+      match /backups/{slot} {
+        allow read, write: if canAccessEtablissement(etablissementId);
+      }
+    }
+
+    // Pairage QR sans compte (scanner) : une session anonyme ne doit accéder
+    // QU'à son propre document de pairing, jamais aux données de l'établissement.
+    // (Déjà en place avant P1 — reprise à l'identique, à vérifier contre la
+    // version réellement déployée.)
+    match /pairings/{pairId} {
+      allow read, write: if request.auth != null;
+      allow delete: if false; // les sessions de pairing expirent, ne se suppriment pas manuellement
+    }
+
+    // Extension Firebase "Trigger Email from Firestore" : le client a seulement
+    // le droit de CRÉER un document (déclenche l'envoi) ; l'extension elle-même
+    // tourne côté serveur avec les droits admin et n'est pas soumise à ces règles.
+    match /mail/{autoId} {
+      allow create: if request.auth != null;
+      allow read, update, delete: if false;
+    }
+  }
+}
