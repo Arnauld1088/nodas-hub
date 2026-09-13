@@ -55,7 +55,7 @@ document.getElementById('modal-article').classList.add('open');
 }
 
 function deleteArticle(id) {
-if (window.isEconome && window.isEconome()) { showToast('⚠ Action réservée à l\'administrateur','var(--red)'); return; }
+if ((window.isEconome && window.isEconome()) || (window.isSecteurResponsable && window.isSecteurResponsable())) { showToast('⚠ Action réservée à l\'administrateur','var(--red)'); return; }
 const art = state.articles.find(a => a.id===id);
 if (!art) return;
 if (!confirm(`Supprimer "${art.designation}" ? Cette action supprimera aussi ses mouvements.`)) return;
@@ -118,6 +118,11 @@ document.getElementById('hist-body').innerHTML =
 +(lastP?.prix_ttc?'<span class="badge badge-gray">Dernier prix: '+fmtNum(lastP.prix_ttc)+' F</span>':'')
 +(totalAchats>0?'<span class="badge badge-gray">Total investi: '+fmtNum(Math.round(totalAchats))+' F</span>':'')
 +'</div>'
++(allEmplacements().length>1 ?
+'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--surface2);border-radius:10px;padding:10px 14px;margin-bottom:18px;border:1px solid var(--border)">'
++'<span style="font-size:12px;color:var(--text3)">📍 Stock par emplacement :</span>'
++allEmplacements().map(e => '<span class="badge '+(getStock(art,e)>0?'badge-blue':'badge-gray')+'">'+e+' : '+fmt(getStock(art,e))+' '+(art.unite||'')+'</span>').join('')
++'</div>' : '')
 +'<div style="display:flex;align-items:center;gap:10px;background:var(--surface2);border-radius:10px;padding:10px 14px;margin-bottom:18px;border:1px solid var(--border)">'
 +'<span style="font-size:12px;color:var(--text3)">📷 Code-barres / QR :</span>'
 +'<strong style="font-size:13px">'+(art.code_barre||'Non associé')+'</strong>'
@@ -215,9 +220,9 @@ return `<tr>
 <td><span class="badge badge-gray">${a.categorie||'—'}</span></td>
 <td style="color:var(--text3)">${a.unite||'—'}</td>
 <td>${fmt(a.stock_min)}</td>
-<td style="color:var(--text2)">${a.prix_achat>0?fmtNum(a.prix_achat)+' F':'—'}</td>
-<td style="color:var(--text2)">${a.prix_vente>0?fmtNum(a.prix_vente)+' F':'—'}</td>
-<td style="color:${margeCouleur(a)}">${margeLabel(a)}</td>
+<td class="prix-col" style="color:var(--text2)">${a.prix_achat>0?fmtNum(a.prix_achat)+' F':'—'}</td>
+<td class="prix-col" style="color:var(--text2)">${a.prix_vente>0?fmtNum(a.prix_vente)+' F':'—'}</td>
+<td class="prix-col" style="color:${margeCouleur(a)}">${margeLabel(a)}</td>
 <td>
 <div style="display:flex;align-items:center;gap:8px">
 <span style="font-weight:600;min-width:30px">${fmt(s)}</span>
@@ -227,10 +232,10 @@ return `<tr>
 <td>${stockBadge(a)}</td>
 <td style="white-space:nowrap">
 <button class="btn btn-outline btn-sm" onclick="showHistorique(${a.id})" title="Historique">📋</button>
-<button class="btn btn-outline btn-sm" onclick="openEntreeForArticle('${a.designation.replace(/'/g,"\\'")}')">+ Entrée</button>
+<button class="btn btn-outline btn-sm not-secteur-action" onclick="openEntreeForArticle('${a.designation.replace(/'/g,"\\'")}')">+ Entrée</button>
 <button class="btn btn-outline btn-sm admin-only-action" onclick="openCorrection(${a.id})" title="Corriger le stock">⚖</button>
-<button class="btn btn-outline btn-sm" onclick="editArticle(${a.id})">✏</button>
-<button class="btn btn-danger btn-sm" onclick="deleteArticle(${a.id})">🗑</button>
+<button class="btn btn-outline btn-sm not-secteur-action" onclick="editArticle(${a.id})">✏</button>
+<button class="btn btn-danger btn-sm not-secteur-action" onclick="deleteArticle(${a.id})">🗑</button>
 </td>
 </tr>`;
 }).join('') || '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text3)">Aucun article trouvé</td></tr>';

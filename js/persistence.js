@@ -173,7 +173,7 @@ state.categoriesOffert = ['Invité / VIP', 'Dégustation / Marketing', 'Erreur c
 }
 
 function resetData() {
-if (window.isEconome && window.isEconome()) { showToast('⚠ Action réservée à l\'administrateur','var(--red)'); return; }
+if ((window.isEconome && window.isEconome()) || (window.isSecteurResponsable && window.isSecteurResponsable())) { showToast('⚠ Action réservée à l\'administrateur','var(--red)'); return; }
 if (!confirm('⚠ Réinitialiser TOUTES les données ? Articles, entrées, sorties et fournisseurs seront supprimés.\n\nCette action est irréversible.')) return;
 state.articles=[]; state.purchases=[]; state.sorties=[]; state.fournisseurs=[]; state.ventes=[]; state.commandes=[];
 logActivity('reset', 'Réinitialisation complète des données');

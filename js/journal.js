@@ -17,6 +17,9 @@ const actionF = document.getElementById('filter-journal-action')?.value||'';
 const from = document.getElementById('filter-journal-from')?.value||'';
 const to = document.getElementById('filter-journal-to')?.value||'';
 let filtered = (state.activityLog||[]).filter(l => {
+// Un responsable de secteur ne voit que ses propres actions (pas le journal complet, réservé
+// à l'admin/économe).
+if (window.isSecteurResponsable && window.isSecteurResponsable() && l.user !== (window._currentUser&&window._currentUser.email)) return false;
 const dateOnly = (l.ts||'').substring(0,10);
 if (q && !(l.label||'').toLowerCase().includes(q) && !(l.user||'').toLowerCase().includes(q)) return false;
 if (actionF && l.action !== actionF) return false;
@@ -50,7 +53,7 @@ renderPagination('journal-pages', state.logPage, pages, 'logPage', 'renderJourna
 // le vider ne peut pas se faire via saveState() (qui ne gère que les domaines "tableau").
 // On vide le cache local, puis on déclenche la suppression de tous les documents côté cloud.
 function clearActivityLog() {
-if (window.isEconome && window.isEconome()) { showToast('⚠ Réservé à l\'administrateur','var(--red)'); return; }
+if ((window.isEconome && window.isEconome()) || (window.isSecteurResponsable && window.isSecteurResponsable())) { showToast('⚠ Réservé à l\'administrateur','var(--red)'); return; }
 if (!confirm('Vider le journal d\'activité ? Cette action est irréversible.')) return;
 state.activityLog = [];
 try { localStorage.setItem('gestion_stock_v2', JSON.stringify({...JSON.parse(localStorage.getItem('gestion_stock_v2')||'{}'), activityLog: []})); } catch(e) {}

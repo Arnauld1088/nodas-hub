@@ -158,12 +158,19 @@ window.isEconome = function() {
 window.isScanner = function() {
   return window._role === 'scanner';
 };
+// Responsable de secteur : rôle restreint à UN secteur précis (window._secteurActif), qui ne
+// peut enregistrer que des sorties/ventes pour ce secteur, et des retours vers l'Économat —
+// jamais de distribution (Économat → secteur), réservée à l'admin/économe.
+window.isSecteurResponsable = function() {
+  return window._role === 'secteur';
+};
 
 // Détermine à quel établissement (users/{etablissementId}) l'utilisateur connecté doit accéder,
 // et avec quel rôle. Un compte économe est lié via un document accountLinks/{uid}.
 async function resolveAccountContext(user) {
   window._etablissementId = user.uid;
   window._role = 'admin';
+  window._secteurActif = null;
   window._accountDisabled = false;
   try {
     const linkSnap = await getDoc(doc(db, 'accountLinks', user.uid));
@@ -171,6 +178,7 @@ async function resolveAccountContext(user) {
       const link = linkSnap.data();
       window._etablissementId = link.etablissementId || user.uid;
       window._role = link.role || 'admin';
+      window._secteurActif = link.secteur || null;
       window._accountDisabled = link.disabled === true;
     }
   } catch (e) {
@@ -788,8 +796,18 @@ async function loadUserData(user) {
   }
   // Restreindre l'interface pour un compte économe : pas d'accès aux Paramètres, pas de suppression.
   const navParam = document.getElementById('nav-parametres');
-  if (navParam) navParam.style.display = window.isEconome() ? 'none' : '';
+  if (navParam) navParam.style.display = (window.isEconome() || window.isSecteurResponsable()) ? 'none' : '';
   document.body.classList.toggle('role-econome', window.isEconome());
+  document.body.classList.toggle('role-secteur', window.isSecteurResponsable());
+  if (window.isSecteurResponsable()) {
+    // Accès restreint à un seul secteur : masquer tout ce qui ne concerne pas son périmètre
+    // (achats/fournisseurs/prix/analyses/administration). Voir README, section "Rôles".
+    const pagesInterdites = ['dashboard','entrees','commandes','historiqueprix','fournisseurs','analyse','foodcost','recettes','import'];
+    document.querySelectorAll('.nav-item').forEach(el => {
+      const oc = el.getAttribute('onclick') || '';
+      if (pagesInterdites.some(p => oc.includes("showPage('"+p+"')"))) el.style.display = 'none';
+    });
+  }
   showPage('aujourdhui');
   if (typeof checkAndSendStockAlertEmail === 'function') checkAndSendStockAlertEmail();
   if (typeof checkAndWriteServerBackup === 'function') checkAndWriteServerBackup();
@@ -809,7 +827,7 @@ window.onUserReady = function(user) {
 // déconnecter la session de l'admin, puis on enregistre un lien accountLinks/{uid}
 // qui pointe vers l'établissement de l'admin (son propre uid) avec le rôle 'econome'.
 window.createEconomeAccount = async function() {
-  if (window.isEconome()) { showToast('⚠ Réservé à l\'administrateur','var(--red)'); return; }
+  if (window.isEconome() || window.isSecteurResponsable()) { showToast('⚠ Réservé à l\'administrateur','var(--red)'); return; }
   const emailEl = document.getElementById('econome-email');
   const pwdEl = document.getElementById('econome-password');
   const email = emailEl.value.trim();
@@ -844,7 +862,7 @@ window.createEconomeAccount = async function() {
 // Ce compte, une fois connecté (typiquement sur un téléphone), atterrit sur l'écran plein écran
 // "Mode Scanner" au lieu de l'interface normale — voir onAuthStateChanged plus bas.
 window.createScannerAccount = async function() {
-  if (window.isEconome() || window.isScanner()) { showToast('⚠ Réservé à l\'administrateur','var(--red)'); return; }
+  if (window.isEconome() || window.isScanner() || window.isSecteurResponsable()) { showToast('⚠ Réservé à l\'administrateur','var(--red)'); return; }
   const emailEl = document.getElementById('scanner-account-email');
   const pwdEl = document.getElementById('scanner-account-password');
   const email = emailEl.value.trim();
@@ -875,8 +893,47 @@ window.createScannerAccount = async function() {
   }
 };
 
+// Crée un compte "Responsable de secteur" : lié à UN secteur précis (parmi ceux définis dans
+// Paramètres). Ce compte ne pourra enregistrer que des sorties/ventes pour ce secteur, et des
+// retours vers l'Économat — jamais recevoir de distribution (voir isSecteurResponsable() et
+// les restrictions dans entrees-sorties.js/ventes.js/transferts.js/ui-core.js).
+window.createSecteurAccount = async function() {
+  if (window.isEconome() || window.isScanner() || window.isSecteurResponsable()) { showToast('⚠ Réservé à l\'administrateur','var(--red)'); return; }
+  const emailEl = document.getElementById('secteur-account-email');
+  const pwdEl = document.getElementById('secteur-account-password');
+  const secteurEl = document.getElementById('secteur-account-secteur');
+  const email = emailEl.value.trim();
+  const pwd = pwdEl.value;
+  const secteur = secteurEl.value;
+  if (!email || !pwd || !secteur) { showToast('⚠ Email, mot de passe et secteur requis','var(--red)'); return; }
+  if (pwd.length < 6) { showToast('⚠ Mot de passe trop court (6 caractères min.)','var(--red)'); return; }
+  try {
+    const secondaryApp = initializeApp(firebaseConfig, 'Secondary-'+Date.now());
+    const secondaryAuth = getAuth(secondaryApp);
+    const cred = await createUserWithEmailAndPassword(secondaryAuth, email, pwd);
+    const newUid = cred.user.uid;
+    await signOut(secondaryAuth);
+    await deleteApp(secondaryApp);
+    await setDoc(doc(db, 'accountLinks', newUid), {
+      etablissementId: window._etablissementId,
+      role: 'secteur',
+      secteur,
+      email,
+      createdAt: serverTimestamp()
+    });
+    state.members = state.members || [];
+    state.members.push({ uid: newUid, email, role: 'secteur', secteur });
+    saveState('meta');
+    renderSettings();
+    emailEl.value = ''; pwdEl.value = '';
+    showToast('✓ Compte Responsable de secteur créé : '+email+' ('+secteur+')');
+  } catch (err) {
+    showToast('⚠ '+authErrorMsg(err.code||''), 'var(--red)');
+  }
+};
+
 window.removeEconomeAccount = async function(uid, email) {
-  if (window.isEconome()) { showToast('⚠ Réservé à l\'administrateur','var(--red)'); return; }
+  if (window.isEconome() || window.isSecteurResponsable()) { showToast('⚠ Réservé à l\'administrateur','var(--red)'); return; }
   if (!confirm('Retirer l\'accès de '+email+' à cet établissement ?\n(Le compte lui-même n\'est pas supprimé, il ne pourra simplement plus se connecter à ces données.)')) return;
   try {
     await deleteDoc(doc(db, 'accountLinks', uid));

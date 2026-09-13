@@ -4,7 +4,7 @@
 // ============================================================
 
 function openCorrection(id) {
-if (window.isEconome && window.isEconome()) { showToast('⚠ Réservé à l\'administrateur','var(--red)'); return; }
+if ((window.isEconome && window.isEconome()) || (window.isSecteurResponsable && window.isSecteurResponsable())) { showToast('⚠ Réservé à l\'administrateur','var(--red)'); return; }
 const sorted = [...state.articles].sort((a,b) => a.designation.localeCompare(b.designation));
 document.getElementById('correction-article').innerHTML =
 '<option value="">— Choisir un article —</option>' +
@@ -55,7 +55,7 @@ prev.style.borderColor = newStock < 0 ? 'rgba(255,102,102,0.4)' : 'rgba(201,168,
 }
 
 function saveCorrection() {
-if (window.isEconome && window.isEconome()) { showToast('⚠ Réservé à l\'administrateur','var(--red)'); return; }
+if ((window.isEconome && window.isEconome()) || (window.isSecteurResponsable && window.isSecteurResponsable())) { showToast('⚠ Réservé à l\'administrateur','var(--red)'); return; }
 const id = parseInt(document.getElementById('correction-article').value);
 const art = state.articles.find(a => a.id === id);
 const qte = parseFloat(document.getElementById('correction-qte').value);

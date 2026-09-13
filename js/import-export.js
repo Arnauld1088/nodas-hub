@@ -32,6 +32,23 @@ filename='alertes';
 rows=[['Nom','IFU','RC','Adresse','Email','Tel','Categorie'],
 ...state.fournisseurs.map(f=>[f.nom,f.ifu||'',f.rc||'',f.adresse||'',f.email||'',f.tel1||'',f.categorie||''])];
 filename='fournisseurs';
+} else if (type==='stock-secteurs') {
+const emp = allEmplacements();
+rows=[['Article','Categorie',...emp,'Total'],
+...state.articles.map(a=>{const vals=emp.map(e=>getStock(a,e));return [a.designation,a.categorie||'',...vals,vals.reduce((s,v)=>s+v,0)];})];
+filename='stock_par_secteur';
+} else if (type==='recettes') {
+rows=[['Nom','Type','Prix_vente','Portions','Ingredient','Quantite','Unite','Notes']];
+state.recettes.forEach(r=>{
+if (!r.ingredients || !r.ingredients.length) {
+rows.push([r.nom,r.type||'',r.prix_vente||0,r.portions||1,'','','',r.notes||'']);
+} else {
+r.ingredients.forEach(ing=>{
+rows.push([r.nom,r.type||'',r.prix_vente||0,r.portions||1,ing.article||'',ing.quantite||0,ing.unite||'',r.notes||'']);
+});
+}
+});
+filename='recettes';
 }
 return { rows, filename };
 }
@@ -238,6 +255,19 @@ fields: [
 { id:'f-email', label:'Email', required:false, patterns:['email','mail','courriel','e-mail'] },
 { id:'f-tel1', label:'Téléphone', required:false, patterns:['tel','tél','phone','mobile','gsm','contact','num','fixe'] },
 { id:'f-categorie', label:'Catégorie', required:false, patterns:['catég','categ','famille','type'] },
+]
+},
+recettes: {
+hint: 'Recettes/cocktails : une ligne par ingrédient — les lignes partageant le même nom de recette sont regroupées automatiquement',
+fields: [
+{ id:'f-nom', label:'Nom de la recette', required:true, patterns:['nom.*recette','recette','plat','cocktail','nom'] },
+{ id:'f-type', label:'Type (plat/cocktail/dessert...)', required:false, patterns:['type','categ','famille'] },
+{ id:'f-prix_vente', label:'Prix de vente (FCFA)', required:false, patterns:['prix.vente','prix_vente','vente','pv','tarif'] },
+{ id:'f-portions', label:'Portions', required:false, patterns:['portion','nb.*personne','couvert','portions'] },
+{ id:'f-ingredient', label:'Ingrédient (article)', required:true, patterns:['ingr[ée]dient','article','composant'] },
+{ id:'f-ing_quantite', label:'Quantité de l\'ingrédient', required:true, patterns:['quant','qté','qte','qty','dosage'] },
+{ id:'f-ing_unite', label:'Unité de l\'ingrédient', required:false, patterns:['unit','mesure','uom'] },
+{ id:'f-notes', label:'Notes / Préparation', required:false, patterns:['note','pr[ée]paration','instruction','recette.*texte'] },
 ]
 }
 };
@@ -476,6 +506,21 @@ tel1: gv(row, iTel), categorie: gv(row, iCat),
 });
 ok++;
 });
+} else if (UI.type === 'recettes') {
+const iNom=gi('f-nom'), iType=gi('f-type'), iPrixV=gi('f-prix_vente'), iPortions=gi('f-portions');
+const iIng=gi('f-ingredient'), iIngQte=gi('f-ing_quantite'), iIngUnite=gi('f-ing_unite'), iNotes=gi('f-notes');
+UI.rawRows.forEach(row => {
+const nom = gv(row, iNom);
+const ingredient = gv(row, iIng);
+const qte = uiParseNum(row[iIngQte]);
+if (!nom || !ingredient) { skipped++; return; }
+if (!qte) { skipped++; return; }
+UI.mappedData.push({
+nom, type: gv(row,iType)||'plat', prix_vente: uiParseNum(row[iPrixV])||0, portions: parseInt(row[iPortions])||1,
+ingredient, ing_quantite: qte, ing_unite: gv(row,iIngUnite), notes: gv(row,iNotes)
+});
+ok++;
+});
 }
 uiLog(4, `📊 Lignes analysées : <strong>${UI.rawRows.length}</strong>`, 'info');
 uiLog(4, `✓ Lignes valides : <strong>${ok}</strong>`, 'ok');
@@ -485,7 +530,7 @@ const pillsHtml = [
 `<span class="ui-pill info">📋 ${ok} ligne(s)</span>`,
 skipped ? `<span class="ui-pill warn">⚠ ${skipped} ignorée(s)</span>` : '',
 dateErr ? `<span class="ui-pill warn">📅 ${dateErr} date(s) invalide(s)</span>` : '',
-`<span class="ui-pill">${({articles:'▦ Articles', entrees:'↓ Entrées', sorties:'↑ Sorties', fournisseurs:'◉ Fournisseurs'})[UI.type]}</span>`,
+`<span class="ui-pill">${({articles:'▦ Articles', entrees:'↓ Entrées', sorties:'↑ Sorties', fournisseurs:'◉ Fournisseurs', recettes:'🍽 Recettes'})[UI.type]}</span>`,
 ].filter(Boolean).join('');
 document.getElementById('ui-result-pills').innerHTML = pillsHtml;
 if (UI.mappedData.length) {
@@ -533,11 +578,24 @@ if (state.fournisseurs.find(f => f.nom.toLowerCase()===r.nom.toLowerCase())) { s
 state.fournisseurs.push({ nom:r.nom, ifu:r.ifu||'', rc:r.rc||'', adresse:r.adresse||'', email:r.email||'', tel1:r.tel1||'', categorie:r.categorie||'' });
 added++;
 });
+} else if (UI.type === 'recettes') {
+// Une ligne = un ingrédient : on regroupe par nom de recette avant de créer les recettes.
+const groupes = {};
+UI.mappedData.forEach(r => {
+if (!groupes[r.nom]) groupes[r.nom] = { nom:r.nom, type:r.type||'plat', prix_vente:r.prix_vente||0, portions:r.portions||1, notes:r.notes||'', ingredients:[] };
+groupes[r.nom].ingredients.push({ article:r.ingredient, quantite:r.ing_quantite, unite:r.ing_unite||'' });
+});
+Object.values(groupes).forEach(rec => {
+if (state.recettes.find(x => x.nom.toLowerCase()===rec.nom.toLowerCase())) { skipped++; return; }
+rec.id = 'rec-'+Date.now()+Math.random().toString(36).slice(2,6);
+state.recettes.push(rec);
+added++;
+});
 }
 logActivity('import', 'Import '+UI.type+' : '+added+' ajouté(s)'+(skipped?', '+skipped+' doublon(s) ignoré(s)':''));
 // Le domaine à synchroniser dépend du type importé ; entrées/sorties touchent aussi les
 // articles (mise à jour de total_entrant/total_sortant sur les articles existants).
-const IMPORT_DOMAINS = { articles:['articles'], entrees:['purchases','articles'], sorties:['sorties','articles'], fournisseurs:['fournisseurs'] };
+const IMPORT_DOMAINS = { articles:['articles'], entrees:['purchases','articles'], sorties:['sorties','articles'], fournisseurs:['fournisseurs'], recettes:['recettes'] };
 saveState(IMPORT_DOMAINS[UI.type] || 'all'); renderDashboard();
 showToast(`✓ Import ${UI.type} : ${added} ajouté(s)${skipped?', '+skipped+' doublon(s) ignoré(s)':''}`, 'var(--green)');
 UI.mappedData = [];

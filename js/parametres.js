@@ -13,7 +13,7 @@ applyTheme();
 const pageParam = document.getElementById('page-parametres');
 if (pageParam) {
 let banner = document.getElementById('param-migration-banner');
-if (window._migrationPending && !window.isEconome() && !window.isScanner()) {
+if (window._migrationPending && !window.isEconome() && !window.isScanner() && !window.isSecteurResponsable()) {
 if (!banner) {
 banner = document.createElement('div');
 banner.id = 'param-migration-banner';
@@ -27,6 +27,11 @@ banner.remove();
 }
 }
 renderEmplacementsSection();
+const secteurAccSel = document.getElementById('secteur-account-secteur');
+if (secteurAccSel) {
+const secteursSeuls = allEmplacements().filter(e => e !== 'Économat');
+secteurAccSel.innerHTML = secteursSeuls.length ? secteursSeuls.map(e=>`<option value="${e}">${e}</option>`).join('') : '<option value="">— Aucun secteur défini —</option>';
+}
 const syncDescEl = document.getElementById('param-sync-desc');
 if (syncDescEl) syncDescEl.textContent = document.getElementById('sync-label')?.textContent || '—';
 renderCategoriesArticlesList();
@@ -54,7 +59,7 @@ if (comptesList) {
 const members = state.members || [];
 comptesList.innerHTML = members.length ? members.map(m => `
 <div class="setting-row">
-<div><div class="setting-label">${m.email}${m.uid===(window._currentUser&&window._currentUser.uid)?' <span style="color:var(--gold);font-size:11px">(vous)</span>':''}</div><div class="setting-desc">${m.role==='admin'?'Administrateur':m.role==='scanner'?'Scanner':'Économe'}</div></div>
+<div><div class="setting-label">${m.email}${m.uid===(window._currentUser&&window._currentUser.uid)?' <span style="color:var(--gold);font-size:11px">(vous)</span>':''}</div><div class="setting-desc">${m.role==='admin'?'Administrateur':m.role==='scanner'?'Scanner':m.role==='secteur'?'Responsable secteur — '+(m.secteur||'?'):'Économe'}</div></div>
 ${m.role!=='admin' ? `<button class="btn btn-danger btn-sm" onclick="removeEconomeAccount('${m.uid}','${String(m.email).replace(/'/g,"\\'")}')">Retirer l'accès</button>` : ''}
 </div>`).join('') : '<div style="color:var(--text3);font-size:12px">Aucun compte économe créé pour le moment</div>';
 }

@@ -69,7 +69,7 @@ document.querySelectorAll('.nav-item').forEach(n => {
 const t = n.textContent;
 if ((id==='aujourdhui' && t.includes('Aujourd')) || (id==='dashboard' && t.includes('bord')) || (id==='articles' && t.includes('Articles')) ||
 (id==='alertes' && t.includes('Alertes')) || (id==='entrees' && t.includes('Entrées')) ||
-(id==='sorties' && t.includes('Sorties')) || (id==='transferts' && t.includes('Transferts')) || (id==='ventes' && t.includes('Ventes')) || (id==='commandes' && t.includes('commande')) || (id==='historiqueprix' && t.includes('Historique des prix')) || (id==='fournisseurs' && t.includes('Fournisseurs')) ||
+(id==='sorties' && t.includes('Sorties')) || (id==='transferts' && t.includes('Transferts')) || (id==='stock-secteurs' && t.includes('Stock par secteur')) || (id==='ventes' && t.includes('Ventes')) || (id==='commandes' && t.includes('commande')) || (id==='historiqueprix' && t.includes('Historique des prix')) || (id==='fournisseurs' && t.includes('Fournisseurs')) ||
 (id==='import' && t.includes('Import')) || (id==='journal' && t.includes('Journal')) || (id==='parametres' && t.includes('Paramètres')) ||
 (id==='analyse' && t.includes('Consommation')) ||
 (id==='foodcost' && t.includes('Food Cost')) ||
@@ -84,6 +84,7 @@ if (id==='alertes') renderAlertes();
 if (id==='entrees') { populateEntreeFilters(); renderEntrees(); }
 if (id==='sorties') { populateSortieFilters(); renderSorties(); }
 if (id==='transferts') renderTransferts();
+if (id==='stock-secteurs') renderStockSecteurs();
 if (id==='ventes') { populateVenteFilters(); renderVentes(); }
 if (id==='commandes') { populateCommandeFilters(); renderCommandes(); }
 if (id==='historiqueprix') { populateHistoriquePrixFilters(); renderHistoriquePrix(); }
@@ -99,13 +100,16 @@ document.getElementById('global-results').classList.remove('open');
 }
 
 function openModal(id) {
-if (id==='modal-correction' && window.isEconome && window.isEconome()) { showToast('⚠ Réservé à l\'administrateur','var(--red)'); return; }
+if (id==='modal-correction' && ((window.isEconome && window.isEconome()) || (window.isSecteurResponsable && window.isSecteurResponsable()))) { showToast('⚠ Réservé à l\'administrateur','var(--red)'); return; }
 populateSelects();
 if (id==='modal-entree') {
 document.getElementById('entree-date').value = today();
 }
 if (id==='modal-sortie') {
 document.getElementById('sortie-date').value = today();
+const secEl = document.getElementById('sortie-secteur');
+if (window.isSecteurResponsable && window.isSecteurResponsable()) { secEl.value = window._secteurActif || ''; secEl.disabled = true; }
+else { secEl.disabled = false; }
 }
 if (id==='modal-commande') {
 document.getElementById('cmd-edit-id').value = '';
@@ -122,7 +126,8 @@ if (id==='modal-vente') {
 document.getElementById('vente-date').value = today();
 document.getElementById('vente-qte').value = '1';
 document.getElementById('vente-prix').value = '';
-document.getElementById('vente-secteur').value = '';
+document.getElementById('vente-secteur').value = (window.isSecteurResponsable && window.isSecteurResponsable()) ? (window._secteurActif || '') : '';
+document.getElementById('vente-secteur').disabled = !!(window.isSecteurResponsable && window.isSecteurResponsable());
 document.getElementById('vente-note').value = '';
 document.getElementById('vente-statut').value = 'vendu';
 document.getElementById('vente-decompte-stock').checked = true;
@@ -163,6 +168,31 @@ document.getElementById('transfert-date').value = today();
 document.getElementById('transfert-article').value = '';
 document.getElementById('transfert-qte').value = '';
 document.getElementById('transfert-note').value = '';
+const oEl = document.getElementById('transfert-origine');
+const dEl = document.getElementById('transfert-destination');
+if (window.isSecteurResponsable && window.isSecteurResponsable()) {
+// Un responsable de secteur ne peut faire qu'un retour : de SON secteur vers l'Économat —
+// jamais recevoir une distribution (réservée à l'admin/économe, voir README).
+oEl.value = window._secteurActif || ''; oEl.disabled = true;
+dEl.value = 'Économat'; dEl.disabled = true;
+} else {
+oEl.disabled = false; dEl.disabled = false;
+}
+if (typeof updateTransfertStockInfo === 'function') updateTransfertStockInfo();
+}
+if (id==='modal-transfert-groupe') {
+document.getElementById('transfert-groupe-date').value = today();
+document.getElementById('transfert-groupe-note').value = '';
+document.getElementById('transfert-groupe-lines').innerHTML = '';
+addTransfertLigne(); addTransfertLigne();
+const oEl = document.getElementById('transfert-groupe-origine');
+const dEl = document.getElementById('transfert-groupe-destination');
+if (window.isSecteurResponsable && window.isSecteurResponsable()) {
+oEl.value = window._secteurActif || ''; oEl.disabled = true;
+dEl.value = 'Économat'; dEl.disabled = true;
+} else {
+oEl.disabled = false; dEl.disabled = false;
+}
 }
 document.getElementById(id).classList.add('open');
 }
@@ -173,6 +203,7 @@ if (id==='modal-article') { document.getElementById('art-edit-id').value=''; doc
 if (id==='modal-fournisseur') { document.getElementById('four-edit-nom').value=''; document.getElementById('modal-four-title').textContent='◉ Nouveau Fournisseur'; document.getElementById('four-save-btn').textContent='Enregistrer'; ['four-nom','four-ifu','four-rc','four-adresse','four-email','four-tel','four-cat'].forEach(x=>document.getElementById(x).value=''); }
 if (id==='modal-sortie') { const sa=document.getElementById('sortie-article'); if(sa){sa.value='';sa.disabled=false;} ['sortie-date','sortie-qte','sortie-secteur','sortie-cat'].forEach(x=>{const el=document.getElementById(x);if(el)el.value='';}); }
 if (id==='modal-transfert') { ['transfert-article','transfert-date','transfert-qte','transfert-note'].forEach(x=>{const el=document.getElementById(x);if(el)el.value='';}); }
+if (id==='modal-transfert-groupe') { const l=document.getElementById('transfert-groupe-lines'); if(l) l.innerHTML=''; const n=document.getElementById('transfert-groupe-note'); if(n) n.value=''; }
 }
 
 function populateSelects() {
@@ -195,6 +226,8 @@ const edEl = document.getElementById('entree-destination'); if(edEl) edEl.innerH
 const fedEl = document.getElementById('facture-entree-destination'); if(fedEl) fedEl.innerHTML = empOptsHTML(fedEl.value||'Économat');
 const toEl = document.getElementById('transfert-origine'); if(toEl) toEl.innerHTML = empOptsHTML(toEl.value);
 const tdEl = document.getElementById('transfert-destination'); if(tdEl) tdEl.innerHTML = empOptsHTML(tdEl.value);
+const tgoEl = document.getElementById('transfert-groupe-origine'); if(tgoEl) tgoEl.innerHTML = empOptsHTML(tgoEl.value);
+const tgdEl = document.getElementById('transfert-groupe-destination'); if(tgdEl) tgdEl.innerHTML = empOptsHTML(tgdEl.value);
 }
 
 function globalSearch() {

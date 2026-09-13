@@ -341,3 +341,104 @@ reste comptabilisé à l'Économat.
 - Les factures groupées (`saveFactureEntree`/`saveFactureSortie`) utilisent
   une seule destination/secteur pour toutes les lignes de la facture — pas
   de destination différente ligne par ligne.
+
+### Règle affinée : les transferts passent toujours par l'Économat
+
+Un transfert direct secteur → secteur est **bloqué** (message d'erreur clair) —
+tout mouvement doit avoir l'Économat comme origine OU destination :
+- **Économat → secteur** (distribution) : génère aussi une entrée dans
+  `state.sorties` (secteur = destination), pour que les rapports existants
+  (Food Cost, mouvements du tableau de bord...) voient le mouvement.
+- **Secteur → Économat** (retour de ce qui n'a pas été utilisé) : génère aussi
+  une entrée dans `state.purchases` (destination = Économat, `facture:'RETOUR'`,
+  prix à 0 — même principe que les corrections de stock).
+
+Dans les deux cas, ces enregistrements miroir sont **purement informatifs** :
+le stock est déjà déplacé par `ajusterStockEmplacement()` au moment du
+transfert lui-même — on ne le déplace pas une seconde fois. Chaque
+enregistrement miroir porte un `transfertId` ; annuler un transfert
+(`deleteTransfert`) supprime aussi son miroir associé, pour ne jamais laisser
+une trace de mouvement qui n'existe plus.
+
+### Où voir le stock par secteur (3 endroits)
+
+1. **Nouvelle page "Stock par secteur"** (menu, sous Transferts) — tableau
+   avec une colonne par emplacement défini, tous les articles, filtrable par
+   catégorie/recherche, exportable en Excel.
+2. **Fiche article** (clic sur un article) — bandeau "📍 Stock par
+   emplacement" avec le détail par secteur (n'apparaît que si au moins un
+   secteur est défini en plus de l'Économat).
+3. **Formulaire de transfert** — affiche en direct "Disponible à [origine] :
+   X" dès que l'article et l'origine sont choisis, avant même de taper la
+   quantité.
+
+## Rôle "Responsable de secteur"
+
+Nouveau rôle, lié à UN secteur précis (choisi à la création du compte, dans
+Paramètres → "Compte Responsable de secteur").
+
+**Peut** : consulter tous les articles (lecture seule, sans les prix), le
+Stock par secteur, enregistrer des sorties/ventes pour son secteur, faire un
+retour vers l'Économat (jamais l'inverse), consulter uniquement ses propres
+actions dans le Journal.
+
+**Ne peut pas** : voir Entrées/Commandes/Fournisseurs/Historique des
+prix/Food Cost/Recettes/Analyse/Import/Paramètres/Tableau de bord, créer ou
+supprimer un article/fournisseur/recette, corriger le stock, gérer les
+comptes, vider le journal, annuler un transfert.
+
+### Comment c'est appliqué techniquement
+
+- `accountLinks/{uid}` porte maintenant un champ `secteur` en plus de `role`.
+- `window.isSecteurResponsable()` (comme `isEconome()`/`isScanner()`) — tous
+  les contrôles "réservé à l'administrateur" déjà en place pour l'économe
+  ont été étendus pour bloquer aussi ce rôle.
+- Masquage des pages non autorisées par JS (comparaison sur l'attribut
+  `onclick` des liens de menu, pas d'ID dédié à ajouter par page).
+- Classe CSS `role-secteur` sur le `<body>` : cache les colonnes de prix
+  (`.prix-col`), les boutons d'action non autorisés (`.not-secteur-action`,
+  `.admin-only-action`) et tous les boutons de suppression (`.btn-danger`).
+- Le champ secteur des formulaires Sortie/Vente est pré-rempli et verrouillé
+  sur son propre secteur ; le formulaire de Transfert est verrouillé sur
+  "son secteur → Économat" (impossible de choisir autre chose).
+- **Aucune modification des règles Firestore nécessaire** : la règle
+  générique déjà en place (accès via `accountLinks`) ne filtre pas par
+  valeur de rôle, elle couvrait donc déjà ce nouveau rôle automatiquement.
+
+### Limite de sécurité à connaître (honnêteté totale)
+
+Comme pour l'économe aujourd'hui, ces restrictions sont appliquées **côté
+client** (masquer/désactiver dans l'interface), pas via des règles Firestore
+distinctes par rôle — Firestore ne permet pas de restriction au niveau d'un
+champ précis (ex: cacher `prix_achat` mais autoriser le reste du même
+document). Un utilisateur techniquement averti pourrait théoriquement
+contourner ces limites via les outils navigateur ou un appel direct à
+l'API Firestore. C'est le même modèle de confiance que celui déjà en place
+pour l'économe — pas une régression introduite ici, juste une limite
+inhérente à l'architecture actuelle (à corriger uniquement via un projet de
+plus grande ampleur : Firestore Functions/Cloud Functions faisant office de
+véritable backend, hors périmètre de cette passe).
+
+## Transfert groupé (plusieurs articles + scan)
+
+Bouton "🧾 Transfert groupé" sur la page Transferts, à côté du transfert
+simple. Même règle qu'un transfert unique (un des deux emplacements doit être
+l'Économat), mais permet de traiter plusieurs articles en une seule
+opération : une ligne par article, avec un bouton 📷 par ligne pour scanner
+le code-barres (`openScanner()`, réutilisé tel quel). Les mêmes
+enregistrements miroir (sortie ou entrée pour les rapports) et le même
+verrouillage pour le rôle "Responsable de secteur" s'appliquent qu'en mode
+simple ou groupé.
+
+## Export / Import des recettes
+
+- **Export** (page Recettes → boutons Excel/CSV, ou assistant d'import
+  universel) : une ligne par ingrédient (nom recette, type, prix de vente,
+  portions, ingrédient, quantité, unité, notes) — la recette est donc répétée
+  sur autant de lignes qu'elle a d'ingrédients. C'est le format le plus
+  simple à éditer en masse dans Excel.
+- **Import** (assistant universel → nouveau type "🍽 Recettes") : les lignes
+  partageant le même nom de recette sont **automatiquement regroupées** en
+  une seule recette avec sa liste d'ingrédients reconstituée. Les doublons
+  (recette déjà existante avec le même nom) sont ignorés, comme pour les
+  autres types d'import.
